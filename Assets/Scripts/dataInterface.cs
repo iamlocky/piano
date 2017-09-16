@@ -22,9 +22,11 @@ public class dataInterface : MonoBehaviour
     private static int reconnectCount = 0;
     private static Thread thread=null;
     static float timer = 0;
+    private static bool isInternalDriverMode = false;
     // Use this for initialization
     void Start()
     {
+        isInternalDriverMode = false;
         reconnectCount = 0;
         //设定服务器IP地址  
         IPAddress ip = IPAddress.Parse("127.0.0.1");
@@ -43,8 +45,18 @@ public class dataInterface : MonoBehaviour
             Debug.Log("连接手套数据服务失败！");
             Text text = gloveConnText.GetComponent<Text>();
             text.text = "连接手套数据服务失败！";
-            return;
         }
+        string type = gameObject.GetComponent<gloveUtils>().getGloveType();
+        print(type);
+        if (type != "No Glove")
+        {
+
+            Text text = gloveConnText.GetComponent<Text>();
+            text.text = "已连接手套驱动";
+            text.color = Color.green;
+            isInternalDriverMode = true;
+        }
+        
     }
 
     // Update is called once per frame
@@ -58,65 +70,87 @@ public class dataInterface : MonoBehaviour
         {
             receiveMessage();
             timer = 0;
-            try
+
+            if (!isInternalDriverMode)
             {
-                string sendMessage = "Unity3D is online";
-                clientSocket.Send(Encoding.UTF8.GetBytes(sendMessage));
+                try
+                {
+                    string sendMessage = "Unity3D is online";
+                    clientSocket.Send(Encoding.UTF8.GetBytes(sendMessage));
+                }
+                catch
+                {
+                    closeConnection();
+                    Text text = gloveConnText.GetComponent<Text>();
+                    text.text = "手套数据服务连接中断！";
+                    if (thread == null)
+                    {
+                        thread = (new Thread(reConnect));
+                        thread.Start();
+                    }
+                }
             }
-            catch
-            {
-                closeConnection();
-                Text text = gloveConnText.GetComponent<Text>();
-                text.text = "手套数据服务连接中断！";
-                reConnect();
-            }
+            
         }
     }
 
     void receiveMessage()
     {
-        try
+        if (isInternalDriverMode)
         {
-            receiveLength = clientSocket.Receive(result);
-            resultStr = Encoding.UTF8.GetString(result, 0, receiveLength);
-            Debug.Log("接收服务器消息： " + resultStr);
-            string[] message = resultStr.Split(new string[] { "##" }, StringSplitOptions.RemoveEmptyEntries);//分割所有数据
-            Text text = gloveConnText.GetComponent<Text>();
-            if (message[0] == "Unknown")
+            fingerData = gloveUtils.getGloveData();
+        }
+        else
+        {
+            try
             {
-                for (int i = 0; i < 5; i++)
+                receiveLength = clientSocket.Receive(result);
+                resultStr = Encoding.UTF8.GetString(result, 0, receiveLength);
+                Debug.Log("接收服务器消息： " + resultStr);
+                string[] message = resultStr.Split(new string[] { "##" }, StringSplitOptions.RemoveEmptyEntries);//分割所有数据
+                Text text = gloveConnText.GetComponent<Text>();
+                if (message[0] == "Unknown")
                 {
-                    fingerData[i] = 0;
+                    for (int i = 0; i < 5; i++)
+                    {
+                        fingerData[i] = 0;
+                    }
+                    text.text = "已连接到服务，未检测到手套";
+                    text.color = Color.yellow;
                 }
-                text.text = "已连接到服务，未检测到手套";
-                text.color = Color.yellow;
+                else
+                {
+                    string s = message[2];
+                    fingerDataAll = s.Split(new string[] { "||" },
+                        StringSplitOptions.RemoveEmptyEntries);//分割手套手指数据
+                    fingerData[0] = float.Parse(fingerDataAll[0]);
+                    fingerData[1] = float.Parse(fingerDataAll[1]);
+                    fingerData[2] = float.Parse(fingerDataAll[2]);
+                    fingerData[3] = float.Parse(fingerDataAll[3]);
+                    fingerData[4] = float.Parse(fingerDataAll[4]);
+                    hand = message[1];
+                    text.text = "已连接" + message[0] + "(" + hand + ")";
+                    text.color = Color.green;
+                    reconnectCount = 0;
+                }
             }
-            else
+            catch
             {
-                string s = message[2];
-                fingerDataAll = s.Split(new string[] { "||" },
-                    StringSplitOptions.RemoveEmptyEntries);//分割手套手指数据
-                fingerData[0] = float.Parse(fingerDataAll[0]);
-                fingerData[1] = float.Parse(fingerDataAll[1]);
-                fingerData[2] = float.Parse(fingerDataAll[2]);
-                fingerData[3] = float.Parse(fingerDataAll[3]);
-                fingerData[4] = float.Parse(fingerDataAll[4]);
-                hand = message[1];
-                text.text = "已连接" + message[0] + "(" + hand + ")";
-                text.color = Color.green;
-                reconnectCount = 0;
+                receiveLength = 0;
+                resultStr = "";
+
+                closeConnection();
+                Text text = gloveConnText.GetComponent<Text>();
+                text.text = "手套数据服务连接中断！";
+                if (thread == null)
+                {
+                    thread = (new Thread(reConnect));
+                    thread.Start();
+                }
             }
         }
-        catch
-        {
-            receiveLength = 0;
-            resultStr = "";
 
-            closeConnection();
-            Text text = gloveConnText.GetComponent<Text>();
-            text.text = "手套数据服务连接中断！";
-            (new Thread(reConnect)).Start();
-        }
+        
     }
 
     void closeConnection()//关闭连接
